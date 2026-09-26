@@ -1,0 +1,27 @@
+# Beszel hub, built from this repository with the web UI.
+# Upstream's internal/dockerfile_hub expects internal/site/dist to be built
+# beforehand by the release pipeline; this builds it in the image instead.
+FROM oven/bun:1-alpine AS site
+WORKDIR /app/internal/site
+COPY internal/site/package.json internal/site/bun.lock ./
+# same install as upstream release.yml; the committed bun.lock lags package.json
+RUN bun install --no-save
+COPY internal/site ./
+RUN bun run build
+
+FROM golang:alpine AS builder
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . ./
+COPY --from=site /app/internal/site/dist ./internal/site/dist
+RUN apk add --no-cache ca-certificates && update-ca-certificates
+RUN CGO_ENABLED=0 go build -ldflags "-w -s" -o /beszel ./internal/cmd/hub
+
+FROM scratch
+COPY --from=builder /beszel /
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+VOLUME ["/beszel_data"]
+EXPOSE 8090
+ENTRYPOINT ["/beszel"]
+CMD ["serve", "--http=0.0.0.0:8090"]

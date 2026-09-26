@@ -1,0 +1,7 @@
+{
+  "_comment": "Per-app CPU and memory alerts, applied by the hub on start (APP_ALERTS_CONFIG). Keys are system names; '*' is the default for every app. cpu is % of the whole host (as in the containers table), memory is GB, min is minutes over the limit before alerting. On an app, an omitted field inherits the default and 'disabled': true mutes it. Rules here are read-only in the UI; rules added in the UI are kept.",
+  "vienna-1": {
+    "_note": "vienna-1 has 10 cores, so 20% is the old Grafana rule's two cores.",
+    "*": { "cpu": 20, "memory": 2, "min": 10 }
+  }
+}

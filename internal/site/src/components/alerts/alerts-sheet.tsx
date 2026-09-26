@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { toast } from "@/components/ui/use-toast"
+import { AppAlerts } from "@/components/alerts/app-alerts"
 import { alertInfo } from "@/lib/alerts"
 import { pb } from "@/lib/api"
 import { $alerts, $systems } from "@/lib/stores"
@@ -181,6 +182,7 @@ export const AlertDialogContent = memo(function AlertDialogContent({ system }: {
 								system={system}
 							/>
 						))}
+						<AppAlerts system={system} />
 					</div>
 				</TabsContent>
 				<TabsContent value="global">
@@ -411,7 +413,9 @@ export function AlertContent({
 							</div>
 						)}
 					</Suspense>
-          {checked && alertData.note && <span className="block col-span-full text-sm text-muted-foreground -mt-3">{alertData.note()}</span>}
+					{checked && alertData.note && (
+						<span className="block col-span-full text-sm text-muted-foreground -mt-3">{alertData.note()}</span>
+					)}
 				</div>
 			)}
 		</div>

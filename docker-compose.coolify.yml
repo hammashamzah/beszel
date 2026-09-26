@@ -5,8 +5,6 @@
 # - beszel-agent:         upstream agent; talks to the hub over a shared unix socket
 # - beszel-docker-proxy:  read-only Docker API proxy that names containers after
 #                         their Coolify labels; the agent has no Docker socket itself
-# - beszel-app-alerts:    per-app CPU and memory alerts to Discord, which Beszel
-#                         itself only does for the host as a whole
 services:
   beszel:
     build:
@@ -16,6 +14,8 @@ services:
     environment:
       - SERVICE_FQDN_BESZEL_8090
       - APP_URL=https://beszel.kudcrafts.com
+      # per-app alert rules, baked into the image from coolify/app-alerts.json
+      - APP_ALERTS_CONFIG=/beszel_config/app-alerts.json
     volumes:
       - beszel_data:/beszel_data
       - beszel_socket:/beszel_socket
@@ -58,27 +58,6 @@ services:
     healthcheck:
       test: ["CMD", "python3", "-c", "import socket;s=socket.socket(socket.AF_UNIX);s.connect('/proxy/docker.sock')"]
       interval: 30s
-      timeout: 5s
-      retries: 3
-
-  beszel-app-alerts:
-    build:
-      context: coolify/app-alerts
-    restart: unless-stopped
-    environment:
-      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
-      - HOST_LABEL=vienna-1
-      - CPU_LIMIT_PERCENT=200
-      - MEMORY_LIMIT_GB=2
-      - FOR_MINUTES=10
-      - DOCKER_SOCK=/proxy/docker.sock
-    volumes:
-      - beszel_docker_proxy:/proxy
-    depends_on:
-      - beszel-docker-proxy
-    healthcheck:
-      test: ["CMD", "python3", "/app/app_alerts.py", "--healthcheck"]
-      interval: 60s
       timeout: 5s
       retries: 3
 

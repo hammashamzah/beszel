@@ -34,6 +34,9 @@ func (stubHub) HandleStatusAlerts(status string, systemRecord *core.Record) erro
 func (stubHub) HandleContainerAlerts(systemRecord *core.Record, data *esystem.CombinedData, fetchLogs func(containerID string) (string, error)) error {
 	return nil
 }
+func (stubHub) HandleAppAlerts(systemRecord *core.Record, data *esystem.CombinedData) error {
+	return nil
+}
 func (stubHub) CancelPendingStatusAlerts(systemID string)    {}
 func (stubHub) CancelPendingContainerAlerts(systemID string) {}
 

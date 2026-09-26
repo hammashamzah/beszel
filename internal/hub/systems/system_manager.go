@@ -67,6 +67,7 @@ type hubLike interface {
 	HandleNetworkMonitorAlerts(systemRecord *core.Record, results map[string]monitor.Result) error
 	HandleStatusAlerts(status string, systemRecord *core.Record) error
 	HandleContainerAlerts(systemRecord *core.Record, data *system.CombinedData, fetchLogs func(containerID string) (string, error)) error
+	HandleAppAlerts(systemRecord *core.Record, data *system.CombinedData) error
 	CancelPendingStatusAlerts(systemID string)
 	CancelPendingContainerAlerts(systemID string)
 }
@@ -251,6 +252,9 @@ func (sm *SystemManager) onRecordAfterUpdateSuccess(e *core.RecordEvent) error {
 		}
 		if err := sm.hub.HandleContainerAlerts(e.Record, system.data, system.FetchContainerLogsFromAgent); err != nil {
 			e.App.Logger().Error("Error handling container alerts", "err", err)
+		}
+		if err := sm.hub.HandleAppAlerts(e.Record, system.data); err != nil {
+			e.App.Logger().Error("Error handling app alerts", "err", err)
 		}
 	}
 

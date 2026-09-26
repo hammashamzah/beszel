@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/henrygd/beszel/internal/entities/system"
 	"github.com/pocketbase/pocketbase/core"
 )
 
@@ -104,4 +105,9 @@ func (am *AlertManager) SetAlertTriggered(alert CachedAlertData, triggered bool)
 // BuildContainerLogExcerpt exposes buildContainerLogExcerpt for testing.
 func BuildContainerLogExcerpt(raw string) string {
 	return buildContainerLogExcerpt(raw)
+}
+
+// HandleAppAlertsAt runs HandleAppAlerts as if the update arrived at now.
+func (am *AlertManager) HandleAppAlertsAt(systemRecord *core.Record, data *system.CombinedData, now time.Time) error {
+	return am.handleAppAlerts(systemRecord, data, now)
 }

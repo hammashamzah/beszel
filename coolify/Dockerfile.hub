@@ -21,6 +21,7 @@ RUN CGO_ENABLED=0 go build -ldflags "-w -s" -o /beszel ./internal/cmd/hub
 FROM scratch
 COPY --from=builder /beszel /
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY coolify/app-alerts.json /beszel_config/app-alerts.json
 VOLUME ["/beszel_data"]
 EXPOSE 8090
 ENTRYPOINT ["/beszel"]

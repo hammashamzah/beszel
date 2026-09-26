@@ -79,6 +79,10 @@ func (h *Hub) StartHub() error {
 		if err := config.SyncSystems(e); err != nil {
 			return err
 		}
+		// sync app alert rules with their config file; a bad file must not stop the hub
+		if err := h.SyncAppAlertsConfig(); err != nil {
+			h.Logger().Error("Failed to sync app alerts config", "err", err)
+		}
 		// register middlewares
 		h.registerMiddlewares(e)
 		// register api routes
@@ -111,6 +115,7 @@ func (h *Hub) StartHub() error {
 	h.App.OnRecordCreate("user_settings").BindFunc(h.um.InitializeUserSettings)
 
 	bindNetworkMonitorsEvents(h)
+	bindAppAlertsConfigEvents(h)
 
 	pb, ok := h.App.(*pocketbase.PocketBase)
 	if !ok {
@@ -211,4 +216,27 @@ func (h *Hub) MakeLink(parts ...string) string {
 		base = fmt.Sprintf("%s/%s", base, url.PathEscape(part))
 	}
 	return base
+}
+
+// bindAppAlertsConfigEvents re-applies the app alerts config file when a system
+// appears, is renamed, or changes users, since config rules are created per
+// system and user. Routine status updates don't trigger it.
+func bindAppAlertsConfigEvents(h *Hub) {
+	resync := func() {
+		if err := h.SyncAppAlertsConfig(); err != nil {
+			h.Logger().Error("Failed to sync app alerts config", "err", err)
+		}
+	}
+	h.App.OnRecordAfterCreateSuccess("systems").BindFunc(func(e *core.RecordEvent) error {
+		resync()
+		return e.Next()
+	})
+	h.App.OnRecordAfterUpdateSuccess("systems").BindFunc(func(e *core.RecordEvent) error {
+		original := e.Record.Original()
+		if original.GetString("name") != e.Record.GetString("name") ||
+			strings.Join(original.GetStringSlice("users"), ",") != strings.Join(e.Record.GetStringSlice("users"), ",") {
+			resync()
+		}
+		return e.Next()
+	})
 }

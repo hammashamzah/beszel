@@ -28,12 +28,19 @@ class UnixConn(http.client.HTTPConnection):
         self.sock.connect(UPSTREAM)
 
 
-def coolify_name(labels):
+def coolify_name(labels, container_name):
     resource = (labels.get("coolify.resourceName") or "").strip()
-    sub = (labels.get("coolify.serviceName") or "").strip()
     if not resource:
         return None
-    if labels.get("coolify.type") == "service" and sub and sub != resource:
+    if labels.get("coolify.type") == "service":
+        sub = (labels.get("coolify.serviceName") or "").strip()
+    else:
+        # A docker-compose application names each container's compose service here;
+        # a single-container application just repeats the container name.
+        sub = (labels.get("com.docker.compose.service") or "").strip()
+        if sub == container_name:
+            sub = ""
+    if sub and sub != resource:
         return f"{resource}/{sub}"
     return resource
 
@@ -42,7 +49,8 @@ def rename(body):
     containers = json.loads(body)
     by_name = {}
     for c in containers:
-        name = coolify_name(c.get("Labels") or {})
+        original = ((c.get("Names") or ["/"])[0]).lstrip("/")
+        name = coolify_name(c.get("Labels") or {}, original)
         if name:
             by_name.setdefault(name, []).append(c)
     for name, group in by_name.items():

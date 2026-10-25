@@ -22,6 +22,7 @@ import (
 	"github.com/henrygd/beszel/internal/entities/monitor"
 	"github.com/henrygd/beszel/internal/entities/smart"
 	"github.com/henrygd/beszel/internal/entities/system"
+	"github.com/henrygd/beszel/internal/entities/process"
 	"github.com/henrygd/beszel/internal/entities/systemd"
 	"github.com/henrygd/beszel/internal/entities/zfs"
 
@@ -265,6 +266,13 @@ func (sys *System) createRecords(data *system.CombinedData) (*core.Record, error
 			}
 		}
 
+		// process groups and the top process list, from agents run with PROCESSES=true
+		if data.ProcessGroups != nil {
+			if err := createProcessRecords(txApp, data, systemRecord.Id); err != nil {
+				return err
+			}
+		}
+
 		// Update systemd service records when the agent reports a fresh snapshot.
 		// The length check keeps snapshots from older agents working, while the
 		// explicit marker lets newer agents report that a fresh snapshot is empty.
@@ -356,6 +364,41 @@ func createSystemDetailsRecord(app core.App, data *system.Details, systemId stri
 	if err != nil || rowsAffected == 0 {
 		_, err = app.DB().Insert(collectionName, params).Execute()
 	}
+	return err
+}
+
+// createProcessRecords adds a process_stats record for the groups and replaces
+// the system's row in processes with the latest top list.
+func createProcessRecords(app core.App, data *system.CombinedData, systemId string) error {
+	statsCollection, err := app.FindCachedCollectionByNameOrId("process_stats")
+	if err != nil {
+		return err
+	}
+	statsRecord := core.NewRecord(statsCollection)
+	statsRecord.Set("system", systemId)
+	statsRecord.Set("stats", data.ProcessGroups)
+	statsRecord.Set("type", "1m")
+	if err := app.SaveNoValidate(statsRecord); err != nil {
+		return err
+	}
+
+	procs := data.Processes
+	if procs == nil {
+		procs = []*process.Proc{}
+	}
+	procsJSON, err := json.Marshal(procs)
+	if err != nil {
+		return err
+	}
+	_, err = app.DB().NewQuery(
+		"INSERT INTO processes (id, system, procs, updated) VALUES ({:id}, {:system}, {:procs}, {:updated}) " +
+			"ON CONFLICT(id) DO UPDATE SET procs = excluded.procs, updated = excluded.updated",
+	).Bind(dbx.Params{
+		"id":      systemId,
+		"system":  systemId,
+		"procs":   string(procsJSON),
+		"updated": time.Now().UTC().UnixMilli(),
+	}).Execute()
 	return err
 }
 

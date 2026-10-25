@@ -269,6 +269,33 @@ export interface ExtraFsStats {
 	tw?: number
 }
 
+/** One process in an agent's top list (agents run with PROCESSES=true) */
+export interface ProcRecord {
+	/** pid */
+	p: number
+	/** user */
+	u: string
+	/** program name */
+	n: string
+	/** command line */
+	cmd?: string
+	/** group: systemd service or program, tagged with the user in a session */
+	g: string
+	/** cpu, percent of the whole host */
+	c: number
+	/** resident memory, bytes */
+	m: number
+	/** start time, unix seconds */
+	t?: number
+}
+
+export interface ProcessesRecord extends RecordModel {
+	system: string
+	procs: ProcRecord[]
+	/** unix ms */
+	updated: number
+}
+
 export interface ContainerStatsRecord extends RecordModel {
 	system: string
 	stats: ContainerStats[]

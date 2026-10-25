@@ -109,11 +109,21 @@ export function updateAppAlert(id: string, values: AppAlertFields) {
 	flush()
 }
 
-/** The apps currently running on a system: container names up to their first "/". */
+/** The apps currently running on a system: container names up to their first "/", and process groups. */
 export async function getSystemApps(system: string): Promise<string[]> {
-	const containers = await pb.collection<{ name: string }>("containers").getFullList({
-		fields: "name",
-		filter: pb.filter("system={:system}", { system }),
-	})
-	return [...new Set(containers.map((c) => c.name.split("/")[0]))].sort((a, b) => a.localeCompare(b))
+	const filter = pb.filter("system={:system}", { system })
+	const [containers, procs] = await Promise.all([
+		pb.collection<{ name: string }>("containers").getFullList({ filter, fields: "name", requestKey: null }),
+		// process groups, from agents run with PROCESSES=true; "other" sums small groups and never alerts
+		pb
+			.collection<{ stats: { n: string }[] }>("process_stats")
+			.getList(1, 1, { filter: `${filter} && type="1m"`, sort: "-created", fields: "stats", requestKey: null })
+			.then((res) => res.items[0]?.stats ?? [])
+			.catch(() => []),
+	])
+	const apps = new Set(containers.map((c) => c.name.split("/")[0]))
+	for (const group of procs) {
+		if (group.n && group.n !== "other") apps.add(group.n)
+	}
+	return [...apps].sort((a, b) => a.localeCompare(b))
 }

@@ -73,12 +73,16 @@ func (rm *RecordManager) CreateLongerRecords() {
 	err := rm.app.RunInTransaction(func(txApp core.App) error {
 		var err error
 
-		collections := [2]*core.Collection{}
+		collections := [3]*core.Collection{}
 		collections[0], err = txApp.FindCachedCollectionByNameOrId("system_stats")
 		if err != nil {
 			return err
 		}
 		collections[1], err = txApp.FindCachedCollectionByNameOrId("container_stats")
+		if err != nil {
+			return err
+		}
+		collections[2], err = txApp.FindCachedCollectionByNameOrId("process_stats")
 		if err != nil {
 			return err
 		}
@@ -155,8 +159,8 @@ func (rm *RecordManager) CreateLongerRecords() {
 					switch collection.Name {
 					case "system_stats":
 						longerRecord.Set("stats", rm.AverageSystemStats(db, recordIds))
-					case "container_stats":
-						longerRecord.Set("stats", rm.AverageContainerStats(db, recordIds))
+					case "container_stats", "process_stats":
+						longerRecord.Set("stats", rm.averageGroupStats(db, collection.Name, recordIds))
 					}
 					if err := txApp.SaveNoValidate(longerRecord); err != nil {
 						txApp.Logger().Error("failed to save longer record", "err", err)
@@ -623,13 +627,19 @@ func hasBattery(legacy [2]uint8, batteries map[string]uint8) bool {
 
 // Calculate the average stats of a list of container_stats records
 func (rm *RecordManager) AverageContainerStats(db dbx.Builder, records RecordIds) []container.Stats {
+	return rm.averageGroupStats(db, "container_stats", records)
+}
+
+// averageGroupStats averages records of a collection whose stats are a list of
+// container.Stats: container_stats, and process_stats for process groups.
+func (rm *RecordManager) averageGroupStats(db dbx.Builder, collection string, records RecordIds) []container.Stats {
 	allStats := make([][]container.Stats, 0, len(records))
 	var row StatsRecord
 	params := make(dbx.Params, 1)
 	for _, rec := range records {
 		row.Stats = row.Stats[:0]
 		params["id"] = rec.Id
-		db.NewQuery("SELECT stats FROM container_stats WHERE id = {:id}").Bind(params).One(&row)
+		db.NewQuery("SELECT stats FROM " + collection + " WHERE id = {:id}").Bind(params).One(&row)
 		var cs []container.Stats
 		if err := json.Unmarshal(row.Stats, &cs); err != nil {
 			return []container.Stats{}

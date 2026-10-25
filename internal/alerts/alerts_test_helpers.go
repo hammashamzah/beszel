@@ -111,3 +111,9 @@ func BuildContainerLogExcerpt(raw string) string {
 func (am *AlertManager) HandleAppAlertsAt(systemRecord *core.Record, data *system.CombinedData, now time.Time) error {
 	return am.handleAppAlerts(systemRecord, data, now)
 }
+
+// ParseAppAlertsConfigForTest validates an APP_ALERTS_CONFIG file.
+func ParseAppAlertsConfigForTest(raw []byte) error {
+	_, err := parseAppAlertsConfig(raw)
+	return err
+}

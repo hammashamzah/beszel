@@ -64,12 +64,17 @@ export function ContainerCpuChart({
 	dataEmpty,
 	isPodman,
 	cpuConfig,
+	title,
+	description,
 }: {
 	chartData: ChartData
 	grid: boolean
 	dataEmpty: boolean
 	isPodman: boolean
 	cpuConfig: ChartConfig
+	/** override the Docker title, e.g. for process groups */
+	title?: string
+	description?: string
 }) {
 	const { filter, dataPoints } = useContainerDataPoints(cpuConfig, (key, data) => data[key]?.c ?? null)
 
@@ -77,8 +82,8 @@ export function ContainerCpuChart({
 		<ChartCard
 			empty={dataEmpty}
 			grid={grid}
-			title={dockerOrPodman(t`Docker CPU Usage`, isPodman)}
-			description={t`Average CPU utilization of containers`}
+			title={title ?? dockerOrPodman(t`Docker CPU Usage`, isPodman)}
+			description={description ?? t`Average CPU utilization of containers`}
 			cornerEl={<FilterBar />}
 		>
 			<AreaChartDefault

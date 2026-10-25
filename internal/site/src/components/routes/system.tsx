@@ -1,4 +1,5 @@
 import { memo, useState } from "react"
+import { t } from "@lingui/core/macro"
 import { Trans } from "@lingui/react/macro"
 import { compareSemVer, parseSemVer, supportsNetworkMonitors } from "@/lib/utils"
 import type { GPUData } from "@/types"
@@ -20,10 +21,11 @@ import {
 	LazyZfsTable,
 } from "./system/lazy-tables"
 import { LoadAverageChart } from "./system/charts/load-average-chart"
-import { ContainerIcon, CpuIcon, HardDriveIcon, NetworkIcon, TerminalSquareIcon } from "lucide-react"
+import { ActivityIcon, ContainerIcon, CpuIcon, HardDriveIcon, NetworkIcon, TerminalSquareIcon } from "lucide-react"
 import { GpuIcon } from "../ui/icons"
 import SystemdTable from "../systemd-table/systemd-table"
 import ContainersTable from "../containers-table/containers-table"
+import ProcessesTable from "../processes-table/processes-table"
 
 const SEMVER_0_14_0 = parseSemVer("0.14.0")
 const SEMVER_0_15_0 = parseSemVer("0.15.0")
@@ -37,6 +39,10 @@ export default memo(function SystemDetail({ id }: { id: string }) {
 		containerData,
 		chartData,
 		containerChartConfigs,
+		processData,
+		processChartData,
+		processChartConfigs,
+		liveProcs,
 		details,
 		grid,
 		setGrid,
@@ -69,6 +75,7 @@ export default memo(function SystemDetail({ id }: { id: string }) {
 	const maybeHasSmartData = compareSemVer(chartData.agentVersion, SEMVER_0_15_0) >= 0
 	const hasContainersTable = hasContainers && compareSemVer(chartData.agentVersion, SEMVER_0_14_0) >= 0
 	const hasSystemd = system.info.sv
+	const hasProcesses = processData.length > 0 || !!liveProcs?.length
 	const hasGpu = hasGpuData || hasGpuPowerData
 	const hasZfs = Object.keys(systemStats.at(-1)?.stats?.z ?? {}).length > 0
 	const hasNetworkMonitors = supportsNetworkMonitors(system)
@@ -77,11 +84,37 @@ export default memo(function SystemDetail({ id }: { id: string }) {
 	const tabs = ["core", "network", "disk"]
 	if (hasGpu) tabs.push("gpu")
 	if (hasContainers) tabs.push("containers")
+	if (hasProcesses) tabs.push("processes")
 	if (hasSystemd) tabs.push("services")
 	tabsRef.current = tabs
 
 	// shared chart props
 	const coreProps = { chartData, grid, dataEmpty, showMax, isLongerChart, maxValues }
+
+	// process groups: a systemd service, or a program outside one, per user
+	const processCharts = (
+		<>
+			<ContainerCpuChart
+				chartData={processChartData}
+				grid={grid}
+				dataEmpty={dataEmpty}
+				isPodman={false}
+				cpuConfig={processChartConfigs.cpu}
+				title={t`Process CPU Usage`}
+				description={t`CPU use of each service or program, as a percent of the whole host`}
+			/>
+			<ContainerMemoryChart
+				chartData={processChartData}
+				grid={grid}
+				dataEmpty={dataEmpty}
+				isPodman={false}
+				memoryConfig={processChartConfigs.memory}
+				title={t`Process Memory Usage`}
+				description={t`Resident memory of each service or program`}
+			/>
+		</>
+	)
+	const processesTable = <ProcessesTable key={system.id} systemId={system.id} liveProcs={liveProcs} />
 
 	function defaultLayout() {
 		return (
@@ -111,6 +144,8 @@ export default memo(function SystemDetail({ id }: { id: string }) {
 							memoryConfig={containerChartConfigs.memory}
 						/>
 					)}
+
+					{hasProcesses && processCharts}
 
 					<RootDiskCharts systemData={systemData} />
 
@@ -157,6 +192,8 @@ export default memo(function SystemDetail({ id }: { id: string }) {
 
 				{maybeHasSmartData && <LazySmartTable systemId={system.id} />}
 
+				{hasProcesses && processesTable}
+
 				{hasContainersTable && <LazyContainersTable systemId={system.id} />}
 
 				{hasSystemd && <LazySystemdTable systemId={system.id} />}
@@ -192,6 +229,12 @@ export default memo(function SystemDetail({ id }: { id: string }) {
 						<TabsTrigger value="containers" className="w-full flex items-center gap-2">
 							<ContainerIcon className="size-3.5" />
 							<Trans>Containers</Trans>
+						</TabsTrigger>
+					)}
+					{hasProcesses && (
+						<TabsTrigger value="processes" className="w-full flex items-center gap-2">
+							<ActivityIcon className="size-3.5" />
+							<Trans>Processes</Trans>
 						</TabsTrigger>
 					)}
 					{hasSystemd && (
@@ -283,6 +326,17 @@ export default memo(function SystemDetail({ id }: { id: string }) {
 									/>
 								</div>
 								{hasContainersTable && <ContainersTable systemId={system.id} />}
+							</>
+						)}
+					</TabsContent>
+				)}
+
+				{hasProcesses && (
+					<TabsContent value="processes" forceMount className={activeTab === "processes" ? "contents" : "hidden"}>
+						{mountedTabs.has("processes") && (
+							<>
+								<div className="grid xl:grid-cols-2 gap-4">{processCharts}</div>
+								{processesTable}
 							</>
 						)}
 					</TabsContent>

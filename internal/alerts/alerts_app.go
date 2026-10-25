@@ -15,7 +15,8 @@ import (
 //
 // An app is a container name up to its first "/". Containers that the Coolify
 // docker proxy names "resource/service" are summed into their resource, so a
-// multi-container app is judged as a whole.
+// multi-container app is judged as a whole. On agents run with PROCESSES=true,
+// each process group (a systemd service or a program) is an app too.
 //
 // Rules live in the app_alerts collection, one row per (user, system, app).
 // The row for app "*" is the default for every app on the system. A row for a
@@ -31,6 +32,8 @@ const (
 	appAlertDefaultApp   = "*"
 	appAlertDefaultMin   = 10
 	appAlertSourceConfig = "config"
+	// processOtherGroup matches the agent's name for the sum of small process groups
+	processOtherGroup = "other"
 )
 
 // appAlertState is keyed by "<app>|<metric>".
@@ -107,8 +110,8 @@ func (am *AlertManager) HandleAppAlerts(systemRecord *core.Record, data *system.
 }
 
 func (am *AlertManager) handleAppAlerts(systemRecord *core.Record, data *system.CombinedData, now time.Time) error {
-	// an unknown Docker state must neither start nor resolve anything
-	if data == nil || data.Containers == nil {
+	// an unknown Docker and process state must neither start nor resolve anything
+	if data == nil || (data.Containers == nil && data.ProcessGroups == nil) {
 		return nil
 	}
 	records, err := am.hub.FindAllRecords(appAlertsCollection, dbx.HashExp{"system": systemRecord.Id})
@@ -126,6 +129,20 @@ func (am *AlertManager) handleAppAlerts(systemRecord *core.Record, data *system.
 		}
 		u.cpu += c.Cpu
 		u.memMB += c.Mem
+	}
+	// process groups (a systemd service or a program) are apps under their own
+	// name; "other" is the sum of small groups, not something to alert on
+	for _, g := range data.ProcessGroups {
+		if g == nil || g.Name == processOtherGroup {
+			continue
+		}
+		u := usage[g.Name]
+		if u == nil {
+			u = &appUsage{}
+			usage[g.Name] = u
+		}
+		u.cpu += g.Cpu
+		u.memMB += g.Mem
 	}
 
 	rulesByUser := make(map[string]map[string]*core.Record)

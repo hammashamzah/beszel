@@ -19,6 +19,7 @@ import { chartTimeData, listen, parseSemVer } from "@/lib/utils"
 import type {
 	ChartData,
 	ContainerStatsRecord,
+	ProcRecord,
 	SystemDetailsRecord,
 	SystemInfo,
 	SystemRecord,
@@ -82,6 +83,9 @@ export function useSystemData(id: string) {
 	const [system, setSystem] = useState({} as SystemRecord)
 	const [systemStats, setSystemStats] = useState([] as SystemStatsRecord[])
 	const [containerData, setContainerData] = useState([] as ChartData["containerData"])
+	// process groups use the container chart shape; liveProcs is the top list from realtime updates
+	const [processData, setProcessData] = useState([] as ChartData["containerData"])
+	const [liveProcs, setLiveProcs] = useState<ProcRecord[] | null>(null)
 	const persistChartTime = useRef(false)
 	const statsRequestId = useRef(0)
 	const [chartLoading, setChartLoading] = useState(true)
@@ -95,6 +99,8 @@ export function useSystemData(id: string) {
 			persistChartTime.current = false
 			setSystemStats([])
 			setContainerData([])
+			setProcessData([])
+			setLiveProcs(null)
 			setDetails({} as SystemDetailsRecord)
 			$containerFilter.set("")
 		}
@@ -143,6 +149,7 @@ export function useSystemData(id: string) {
 	useEffect(() => {
 		let unsub = () => {}
 		if (!system.id || chartTime !== "1m") {
+			setLiveProcs(null)
 			return
 		}
 		if (system.status !== SystemStatus.Up || parseSemVer(system?.info?.v).minor < 13) {
@@ -153,23 +160,37 @@ export function useSystemData(id: string) {
 		pb.realtime
 			.subscribe(
 				`rt_metrics`,
-				(data: { container: ContainerStatsRecord[]; info: SystemInfo; stats: SystemStats }) => {
+				(data: {
+					container: ContainerStatsRecord[]
+					procGroups?: ContainerStatsRecord["stats"]
+					procs?: ProcRecord[]
+					info: SystemInfo
+					stats: SystemStats
+				}) => {
 					const now = Date.now()
 					const statsPoint = { created: now, stats: data.stats } as SystemStatsRecord
 					const containerPoint =
 						data.container?.length > 0
 							? makeContainerPoint(now, data.container as unknown as ContainerStatsRecord["stats"])
 							: null
+					const processPoint = data.procGroups?.length ? makeContainerPoint(now, data.procGroups) : null
+					if (data.procs) {
+						setLiveProcs(data.procs)
+					}
 					// on first message, make sure we clear out data from other time periods
 					if (isFirst) {
 						isFirst = false
 						setSystemStats([statsPoint])
 						setContainerData(containerPoint ? [containerPoint] : [])
+						setProcessData(processPoint ? [processPoint] : [])
 						return
 					}
 					setSystemStats((prev) => appendData(prev, [statsPoint], 1000, 60))
 					if (containerPoint) {
 						setContainerData((prev) => appendData(prev, [containerPoint], 1000, 60))
+					}
+					if (processPoint) {
+						setProcessData((prev) => appendData(prev, [processPoint], 1000, 60))
 					}
 				},
 				{ query: { system: system.id } }
@@ -197,6 +218,13 @@ export function useSystemData(id: string) {
 	// Share chart config computation for all container charts
 	const containerChartConfigs = useContainerChartConfigs(containerData)
 
+	// process group charts reuse the container charts with the process data swapped in
+	const processChartData: ChartData = useMemo(
+		() => ({ ...chartData, containerData: processData }),
+		[chartData, processData]
+	)
+	const processChartConfigs = useContainerChartConfigs(processData)
+
 	// get stats when system "changes." (Not just system to system,
 	// also when new info comes in via systemManager realtime connection, indicating an update)
 	useEffect(() => {
@@ -209,14 +237,17 @@ export function useSystemData(id: string) {
 		const { expectedInterval } = chartTimeData[chartTime]
 		const ss_cache_key = `${systemId}_${chartTime}_system_stats`
 		const cs_cache_key = `${systemId}_${chartTime}_container_stats`
+		const ps_cache_key = `${systemId}_${chartTime}_process_stats`
 
 		const cachedSystemStats = cache.get(ss_cache_key) as SystemStatsRecord[] | undefined
 		const cachedContainerData = cache.get(cs_cache_key) as ChartData["containerData"] | undefined
+		const cachedProcessData = cache.get(ps_cache_key) as ChartData["containerData"] | undefined
 
 		// Render from cache immediately if available
 		if (cachedSystemStats?.length) {
 			setSystemStats(cachedSystemStats)
 			setContainerData(cachedContainerData || [])
+			setProcessData(cachedProcessData || [])
 			setChartLoading(false)
 
 			// Skip the fetch if the latest cached point is recent enough that no new point is expected yet
@@ -231,7 +262,8 @@ export function useSystemData(id: string) {
 		Promise.allSettled([
 			getStats<SystemStatsRecord>("system_stats", systemId, chartTime, cachedSystemStats),
 			getStats<ContainerStatsRecord>("container_stats", systemId, chartTime, cachedContainerData),
-		]).then(([systemStats, containerStats]) => {
+			getStats<ContainerStatsRecord>("process_stats", systemId, chartTime, cachedProcessData),
+		]).then(([systemStats, containerStats, processStats]) => {
 			// Ignore responses for a previous system or chart time
 			if (requestId !== statsRequestId.current) {
 				return
@@ -253,6 +285,13 @@ export function useSystemData(id: string) {
 				cache.set(cs_cache_key, containerData)
 			}
 			setContainerData(containerData)
+			// make new process group stats
+			let processData = (cache.get(ps_cache_key) || []) as ChartData["containerData"]
+			if (processStats.status === "fulfilled" && processStats.value.length) {
+				processData = appendData(processData, makeContainerData(processStats.value), expectedInterval, 100)
+				cache.set(ps_cache_key, processData)
+			}
+			setProcessData(processData)
 		})
 	}, [system, chartTime])
 
@@ -353,6 +392,10 @@ export function useSystemData(id: string) {
 		containerData,
 		chartData,
 		containerChartConfigs,
+		processData,
+		processChartData,
+		processChartConfigs,
+		liveProcs,
 		details,
 		grid,
 		setGrid,

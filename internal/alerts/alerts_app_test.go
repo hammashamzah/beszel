@@ -190,3 +190,27 @@ func TestAppAlertsConfigSync(t *testing.T) {
 	assert.Error(t, f.am.SyncAppAlertsConfig())
 	assert.Len(t, configRules(), 1)
 }
+
+func TestAppAlertProcessGroups(t *testing.T) {
+	f := newAppAlertFixture(t)
+	defer f.hub.Cleanup()
+	f.rule(t, "*", map[string]any{"memory": 2, "min": 1})
+
+	// a host with no Docker: process groups are apps under their full name, and
+	// "other" (the sum of small groups) never alerts
+	groups := []*container.Stats{
+		{Name: "t3code (hammas)", Cpu: 5, Mem: 2.5 * 1024},
+		{Name: "other", Cpu: 1, Mem: 9 * 1024},
+		{Name: "tailscaled", Cpu: 1, Mem: 100},
+	}
+	require.NoError(t, f.am.HandleAppAlertsAt(f.systemRecord, &system.CombinedData{ProcessGroups: groups}, f.now))
+	require.Equal(t, 1, f.sent())
+	assert.Contains(t, f.lastSubject(), "t3code (hammas) memory above 2 GB")
+}
+
+// The rules file baked into the hub image must parse, or the hub skips it.
+func TestShippedAppAlertsConfigParses(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "coolify", "app-alerts.json"))
+	require.NoError(t, err)
+	require.NoError(t, alerts.ParseAppAlertsConfigForTest(raw))
+}

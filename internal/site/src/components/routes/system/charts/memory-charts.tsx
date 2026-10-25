@@ -85,12 +85,17 @@ export function ContainerMemoryChart({
 	dataEmpty,
 	isPodman,
 	memoryConfig,
+	title,
+	description,
 }: {
 	chartData: ChartData
 	grid: boolean
 	dataEmpty: boolean
 	isPodman: boolean
 	memoryConfig: ChartConfig
+	/** override the Docker title, e.g. for process groups */
+	title?: string
+	description?: string
 }) {
 	const { filter, dataPoints } = useContainerDataPoints(memoryConfig, (key, data) => data[key]?.m ?? null)
 
@@ -98,8 +103,8 @@ export function ContainerMemoryChart({
 		<ChartCard
 			empty={dataEmpty}
 			grid={grid}
-			title={dockerOrPodman(t`Docker Memory Usage`, isPodman)}
-			description={t`Memory usage of containers`}
+			title={title ?? dockerOrPodman(t`Docker Memory Usage`, isPodman)}
+			description={description ?? t`Memory usage of containers`}
 			cornerEl={<FilterBar />}
 		>
 			<AreaChartDefault

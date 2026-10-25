@@ -8,6 +8,7 @@ import (
 
 	"github.com/henrygd/beszel/internal/entities/container"
 	"github.com/henrygd/beszel/internal/entities/monitor"
+	"github.com/henrygd/beszel/internal/entities/process"
 	"github.com/henrygd/beszel/internal/entities/systemd"
 )
 
@@ -213,4 +214,10 @@ type CombinedData struct {
 	// that omitted systemd data (for example, a short-cache dashboard request).
 	SystemdServicesUpdated bool                      `json:"systemdUpdated,omitempty" cbor:"5,keyasint,omitempty"`
 	Monitors               map[string]monitor.Result `cbor:"6,keyasint"`
+	// ProcessGroups is per-group process usage (a systemd service or a program),
+	// shaped like container stats so the hub stores and charts it the same way.
+	// Only agents built with process monitoring send it.
+	ProcessGroups []*container.Stats `json:"procGroups,omitempty" cbor:"7,keyasint,omitempty"`
+	// Processes is the agent's current top list of individual processes.
+	Processes []*process.Proc `json:"procs,omitempty" cbor:"8,keyasint,omitempty"`
 }

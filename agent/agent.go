@@ -50,6 +50,7 @@ type Agent struct {
 	systemdManager            *systemdManager                                       // Manages systemd services
 	monitorManager            *MonitorManager                                       // Manages network monitors
 	storagePoolManager        *StoragePoolManager                                   // Manages storage pool and dataset data
+	processManager            *processManager                                       // Per-process stats (PROCESSES=true)
 }
 
 // NewAgent creates a new agent with the given data directory for persisting data.
@@ -150,6 +151,11 @@ func NewAgent(dataDir ...string) (agent *Agent, err error) {
 		slog.Debug("Systemd", "err", err)
 	}
 
+	// per-process stats, for hosts whose workloads are plain processes
+	if v, _ := utils.GetEnv("PROCESSES"); v == "true" {
+		agent.processManager = newProcessManager()
+	}
+
 	agent.smartManager, err = NewSmartManager()
 	if err != nil {
 		slog.Debug("SMART", "err", err)
@@ -194,6 +200,10 @@ func (a *Agent) gatherStats(options common.DataRequestOptions) *system.CombinedD
 		} else {
 			slog.Debug("Containers", "err", err)
 		}
+	}
+
+	if a.processManager != nil {
+		data.ProcessGroups, data.Processes = a.processManager.collect(cacheTimeMs)
 	}
 
 	if a.monitorManager != nil {

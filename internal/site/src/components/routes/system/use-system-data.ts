@@ -86,6 +86,8 @@ export function useSystemData(id: string) {
 	// process groups use the container chart shape; liveProcs is the top list from realtime updates
 	const [processData, setProcessData] = useState([] as ChartData["containerData"])
 	const [liveProcs, setLiveProcs] = useState<ProcRecord[] | null>(null)
+	// whether the agent reports processes at all, independent of the chart range
+	const [hasProcessList, setHasProcessList] = useState(false)
 	const persistChartTime = useRef(false)
 	const statsRequestId = useRef(0)
 	const [chartLoading, setChartLoading] = useState(true)
@@ -101,6 +103,7 @@ export function useSystemData(id: string) {
 			setContainerData([])
 			setProcessData([])
 			setLiveProcs(null)
+			setHasProcessList(false)
 			setDetails({} as SystemDetailsRecord)
 			$containerFilter.set("")
 		}
@@ -131,6 +134,12 @@ export function useSystemData(id: string) {
 
 	// fetch system details
 	useEffect(() => {
+		if (system.id) {
+			pb.collection("processes")
+				.getOne(system.id, { fields: "id", requestKey: null })
+				.then(() => setHasProcessList(true))
+				.catch(() => setHasProcessList(false))
+		}
 		// if system.info.m exists, agent is old version without system details
 		if (!system.id || system.info?.m) {
 			return
@@ -396,6 +405,7 @@ export function useSystemData(id: string) {
 		processChartData,
 		processChartConfigs,
 		liveProcs,
+		hasProcessList,
 		details,
 		grid,
 		setGrid,

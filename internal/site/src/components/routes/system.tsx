@@ -43,6 +43,7 @@ export default memo(function SystemDetail({ id }: { id: string }) {
 		processChartData,
 		processChartConfigs,
 		liveProcs,
+		hasProcessList,
 		details,
 		grid,
 		setGrid,
@@ -75,7 +76,9 @@ export default memo(function SystemDetail({ id }: { id: string }) {
 	const maybeHasSmartData = compareSemVer(chartData.agentVersion, SEMVER_0_15_0) >= 0
 	const hasContainersTable = hasContainers && compareSemVer(chartData.agentVersion, SEMVER_0_14_0) >= 0
 	const hasSystemd = system.info.sv
-	const hasProcesses = processData.length > 0 || !!liveProcs?.length
+	// the table shows whenever the agent reports processes; the charts need history for the selected range
+	const hasProcesses = hasProcessList || processData.length > 0 || !!liveProcs?.length
+	const hasProcessCharts = processData.length > 0
 	const hasGpu = hasGpuData || hasGpuPowerData
 	const hasZfs = Object.keys(systemStats.at(-1)?.stats?.z ?? {}).length > 0
 	const hasNetworkMonitors = supportsNetworkMonitors(system)
@@ -145,7 +148,7 @@ export default memo(function SystemDetail({ id }: { id: string }) {
 						/>
 					)}
 
-					{hasProcesses && processCharts}
+					{hasProcessCharts && processCharts}
 
 					<RootDiskCharts systemData={systemData} />
 
@@ -335,7 +338,7 @@ export default memo(function SystemDetail({ id }: { id: string }) {
 					<TabsContent value="processes" forceMount className={activeTab === "processes" ? "contents" : "hidden"}>
 						{mountedTabs.has("processes") && (
 							<>
-								<div className="grid xl:grid-cols-2 gap-4">{processCharts}</div>
+								{hasProcessCharts && <div className="grid xl:grid-cols-2 gap-4">{processCharts}</div>}
 								{processesTable}
 							</>
 						)}

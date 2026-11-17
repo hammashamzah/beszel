@@ -9,14 +9,35 @@
     }
   },
   "hammas-dev": {
-    "_note": "8 cores / 16 GB dev box with no Docker. Its agent runs with PROCESSES=true, so apps are process groups: a systemd service, or a program outside one, tagged with the user ('t3code (hammas)', 'bun (hammas)'). 25% is two cores. 'bun (hammas)' is every tmux dev server summed, so it gets 6 GB.",
+    "_note": "8 cores / 16 GB dev box with no Docker. Its agent runs with PROCESSES=true, so apps are process groups: a systemd service, or a program outside one, tagged with the user ('t3code (hammas)', 'bun (hammas)'). A versioned template unit ('cutroom-runner@0.20261117.6') is matched by its base name ('cutroom-runner (hammas)'). 25% is two cores. Limits sit above normal use and need 30 minutes over before alerting. 'bun (hammas)' is every tmux dev server summed. Generic shells and runtimes are not watched on their own.",
     "*": {
       "cpu": 25,
       "memory": 3,
-      "min": 10
+      "min": 30
     },
     "bun (hammas)": {
       "memory": 6
+    },
+    "cutroom-runner (hammas)": {
+      "memory": 12
+    },
+    "e2e-queue-runner (hammas)": {
+      "memory": 6
+    },
+    "claude (hammas)": {
+      "memory": 6
+    },
+    "cutroom (hammas)": {
+      "memory": 6
+    },
+    "zsh (hammas)": {
+      "disabled": true
+    },
+    "bash (hammas)": {
+      "disabled": true
+    },
+    "node (hammas)": {
+      "disabled": true
     }
   }
 }

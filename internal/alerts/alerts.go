@@ -34,7 +34,13 @@ type AlertMessageData struct {
 	Message  string
 	Link     string
 	LinkText string
+	// Priority overrides the ntfy priority set on the webhook URL, for example
+	// QuietPriority on a recovery. Empty keeps the URL's own priority.
+	Priority string
 }
+
+// QuietPriority is the ntfy priority for recoveries: delivered, but silent.
+const QuietPriority = "min"
 
 type UserNotificationSettings struct {
 	Emails   []string `json:"emails"`
@@ -248,7 +254,7 @@ func (am *AlertManager) SendAlert(data AlertMessageData) error {
 		}
 	}
 	for _, webhook := range userAlertSettings.Webhooks {
-		if err := am.sendShoutrrrAlert(webhook, data.Title, data.Message, data.Link, data.LinkText, send); err != nil {
+		if err := am.sendShoutrrrAlert(webhook, data.Title, data.Message, data.Link, data.LinkText, data.Priority, send); err != nil {
 			am.hub.Logger().Error("Failed to send shoutrrr alert", "err", err)
 		}
 	}
@@ -279,10 +285,10 @@ func (am *AlertManager) SendAlert(data AlertMessageData) error {
 
 // SendShoutrrrAlert sends an alert via a Shoutrrr URL
 func (am *AlertManager) SendShoutrrrAlert(notificationUrl, title, message, link, linkText string) error {
-	return am.sendShoutrrrAlert(notificationUrl, title, message, link, linkText, shoutrrr.Send)
+	return am.sendShoutrrrAlert(notificationUrl, title, message, link, linkText, "", shoutrrr.Send)
 }
 
-func (am *AlertManager) sendShoutrrrAlert(notificationUrl, title, message, link, linkText string, send func(string, string) error) error {
+func (am *AlertManager) sendShoutrrrAlert(notificationUrl, title, message, link, linkText, priority string, send func(string, string) error) error {
 	// Parse the URL
 	parsedURL, err := url.Parse(notificationUrl)
 	if err != nil {
@@ -313,6 +319,9 @@ func (am *AlertManager) sendShoutrrrAlert(notificationUrl, title, message, link,
 	switch scheme {
 	case "ntfy":
 		queryParams.Add("Actions", fmt.Sprintf("view, %s, %s", linkText, link))
+		if priority != "" {
+			queryParams.Set("priority", priority)
+		}
 	case "lark":
 		queryParams.Add("link", link)
 	case "bark":

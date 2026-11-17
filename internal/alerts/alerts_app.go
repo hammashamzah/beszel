@@ -23,6 +23,15 @@ import (
 // specific app overrides it field by field: a zero cpu, memory or min falls
 // back to the default. A disabled row mutes that app.
 //
+// A process group run from a versioned systemd template unit
+// ("cutroom-runner@0.20261117.6 (hammas)") is judged under its base name
+// ("cutroom-runner (hammas)"), so a rule survives a release and a release does
+// not look like the app stopping.
+//
+// Recoveries ("back below", "no longer running") go out at QuietPriority. An
+// app that fired and then disappears is only reported gone once it has stayed
+// gone for appAlertGoneGrace, so a restart under the same base name is quiet.
+//
 // While an app is over a limit, the rule row that governs it records since
 // when in its state field, so a hub restart neither resets the clock nor
 // sends the alert twice.
@@ -34,6 +43,9 @@ const (
 	appAlertSourceConfig = "config"
 	// processOtherGroup matches the agent's name for the sum of small process groups
 	processOtherGroup = "other"
+	// appAlertGoneGrace is how long a fired app must stay gone before it is
+	// reported as no longer running.
+	appAlertGoneGrace = 2 * time.Minute
 )
 
 // appAlertState is keyed by "<app>|<metric>".
@@ -43,6 +55,8 @@ type appAlertStateEntry struct {
 	// Since is when the app was first seen over the limit, in unix milliseconds.
 	Since     int64 `json:"since"`
 	Triggered bool  `json:"triggered"`
+	// Gone is when a fired app was first seen missing, in unix milliseconds.
+	Gone int64 `json:"gone,omitempty"`
 }
 
 type appAlertRule struct {
@@ -69,6 +83,20 @@ func appName(containerName string) string {
 		return containerName[:i]
 	}
 	return containerName
+}
+
+// processGroupApp returns the app a process group belongs to: its name with any
+// "@instance" of a systemd template unit removed, keeping the " (user)" suffix.
+func processGroupApp(groupName string) string {
+	at := strings.IndexByte(groupName, '@')
+	if at <= 0 {
+		return groupName
+	}
+	suffix := ""
+	if sp := strings.Index(groupName[at:], " ("); sp >= 0 {
+		suffix = groupName[at+sp:]
+	}
+	return groupName[:at] + suffix
 }
 
 // effectiveAppRule merges an app's override with the default rule. It returns
@@ -136,10 +164,11 @@ func (am *AlertManager) handleAppAlerts(systemRecord *core.Record, data *system.
 		if g == nil || g.Name == processOtherGroup {
 			continue
 		}
-		u := usage[g.Name]
+		app := processGroupApp(g.Name)
+		u := usage[app]
 		if u == nil {
 			u = &appUsage{}
-			usage[g.Name] = u
+			usage[app] = u
 		}
 		u.cpu += g.Cpu
 		u.memMB += g.Mem
@@ -179,7 +208,7 @@ func (am *AlertManager) evaluateAppAlerts(systemRecord *core.Record, userID stri
 
 	systemName := systemRecord.GetString("name")
 	var result error
-	send := func(title, message string) {
+	send := func(title, message, priority string) {
 		err := am.SendAlert(AlertMessageData{
 			UserID:   userID,
 			SystemID: systemRecord.Id,
@@ -187,6 +216,7 @@ func (am *AlertManager) evaluateAppAlerts(systemRecord *core.Record, userID stri
 			Message:  message,
 			Link:     am.hub.MakeLink("system", systemRecord.Id),
 			LinkText: "View " + systemName,
+			Priority: priority,
 		})
 		if err != nil {
 			result = errors.Join(result, err)
@@ -212,12 +242,17 @@ func (am *AlertManager) evaluateAppAlerts(systemRecord *core.Record, userID stri
 			}
 			touch(owner.Id, key)
 			entry := state[key]
+			if entry != nil && entry.Gone != 0 {
+				entry.Gone = 0 // back within the grace period
+				dirty[owner.Id] = true
+			}
 			if m.value <= m.limit {
 				if entry != nil {
 					if entry.Triggered {
 						send(
 							fmt.Sprintf("%s %s back below %s on %s ✅", app, appMetricLabel(m.name), formatAppLimit(m.name, m.limit), systemName),
 							fmt.Sprintf("%s is using %s.", app, formatAppUsage(m.name, m.value)),
+							QuietPriority,
 						)
 					}
 					delete(state, key)
@@ -243,13 +278,15 @@ func (am *AlertManager) evaluateAppAlerts(systemRecord *core.Record, userID stri
 			send(
 				fmt.Sprintf("%s %s above %s on %s \U0001F534", app, appMetricLabel(m.name), formatAppLimit(m.name, m.limit), systemName),
 				fmt.Sprintf("%s has used %s for %d %s (limit %s).", app, formatAppUsage(m.name, m.value), minutes, plural(minutes, "minute", "minutes"), formatAppLimit(m.name, m.limit)),
+				"",
 			)
 		}
 	}
 
 	// Anything not evaluated this round has stopped, been muted, lost its limit,
-	// or moved to another rule. Clear it, and say so if it had fired for an app
-	// that is no longer running.
+	// or moved to another rule. Clear it. A fired app that is no longer running
+	// is kept for appAlertGoneGrace first, in case it comes back (a restart or
+	// a release), and only then reported, quietly.
 	for recordID, state := range states {
 		for key, entry := range state {
 			if touched[recordID][key] {
@@ -257,9 +294,18 @@ func (am *AlertManager) evaluateAppAlerts(systemRecord *core.Record, userID stri
 			}
 			app, metric, _ := strings.Cut(key, "|")
 			if entry.Triggered && usage[app] == nil {
+				if entry.Gone == 0 {
+					entry.Gone = now.UnixMilli()
+					dirty[recordID] = true
+					continue
+				}
+				if now.Sub(time.UnixMilli(entry.Gone)) < appAlertGoneGrace {
+					continue
+				}
 				send(
 					fmt.Sprintf("%s is no longer running on %s ✅", app, systemName),
 					fmt.Sprintf("Its %s alert has been cleared.", appMetricLabel(metric)),
+					QuietPriority,
 				)
 			}
 			delete(state, key)

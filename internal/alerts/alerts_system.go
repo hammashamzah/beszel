@@ -434,6 +434,11 @@ func (am *AlertManager) sendSystemAlert(alert SystemAlertData) {
 		// app.Logger().Error("failed to save alert record", "err", err)
 		return
 	}
+	// a resolved alert is still delivered, but silently
+	priority := ""
+	if !alert.triggered {
+		priority = QuietPriority
+	}
 	am.SendAlert(AlertMessageData{
 		UserID:   alert.alertData.UserID,
 		SystemID: alert.systemRecord.Id,
@@ -441,6 +446,7 @@ func (am *AlertManager) sendSystemAlert(alert SystemAlertData) {
 		Message:  body,
 		Link:     am.hub.MakeLink("system", alert.systemRecord.Id),
 		LinkText: "View " + systemName,
+		Priority: priority,
 	})
 }
 

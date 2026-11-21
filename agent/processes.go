@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/henrygd/beszel/agent/utils"
 	"github.com/henrygd/beszel/internal/entities/container"
 	"github.com/henrygd/beszel/internal/entities/process"
@@ -23,8 +25,9 @@ import (
 // Process monitoring reads /proc directly, so it works on hosts where the
 // workloads are plain processes rather than containers. Each update reports:
 //
-//   - groups: usage summed per systemd service, or per program for processes
-//     outside a service, tagged with the user for processes in a user session.
+//   - groups: usage summed per systemd service, or for processes outside a
+//     service per project (conductor worktree or git repo, see projectName),
+//     else per program, tagged with the user for processes in a user session.
 //     They are shaped like container stats, so the hub stores, charts and
 //     alerts on them the way it does for containers.
 //   - a top list of individual processes (the heaviest by CPU and by memory),
@@ -62,6 +65,12 @@ type processManager struct {
 	bootTime int64
 	prev     map[uint16]*procSnapshot // keyed by cache time, like docker stats
 	users    map[uint32]string
+	projects map[int32]procProject // by pid; a process's environment and folder don't change
+}
+
+type procProject struct {
+	start uint64 // tells a reused pid apart
+	name  string
 }
 
 func newProcessManager() *processManager {
@@ -70,6 +79,7 @@ func newProcessManager() *processManager {
 		pageSize: uint64(os.Getpagesize()),
 		numCPU:   float64(runtime.NumCPU()),
 		prev:     make(map[uint16]*procSnapshot),
+		projects: make(map[int32]procProject),
 	}
 	pm.bootTime = readBootTime(pm.procDir)
 	pm.loadUsers()
@@ -148,7 +158,18 @@ func (pm *processManager) collect(cacheTimeMs uint16) ([]*container.Stats, []*pr
 	}
 
 	for i := range procs {
-		procs[i].group = pm.groupName(&procs[i])
+		p := &procs[i]
+		// a process outside a service is named by its project when it has one,
+		// so tmux dev servers show as "facemap/t3/fix-x" instead of all being "bun"
+		if p.group == "" && p.inUser {
+			p.group = pm.projectName(p.pid, p.start)
+		}
+		p.group = pm.groupName(p)
+	}
+	for pid := range pm.projects {
+		if _, alive := next.procs[pid]; !alive {
+			delete(pm.projects, pid)
+		}
 	}
 	return pm.groups(procs), pm.top(procs)
 }
@@ -216,6 +237,103 @@ func (pm *processManager) groupName(p *procInfo) string {
 		return base + " (" + pm.userName(p.uid) + ")"
 	}
 	return base
+}
+
+// projectName is the project a process belongs to, "" when it has none:
+//
+//   - "<project>/<branch>" from the CONDUCTOR_PROJECT_NAME and CONDUCTOR_BRANCH
+//     a conductor worktree sets for everything it starts;
+//   - otherwise the git repository its working folder is in, by folder name.
+//
+// For other users' processes both need CAP_SYS_PTRACE (see readEnviron);
+// without it every lookup fails and processes keep their program name. Only
+// these three variables are used from the environment; nothing else is kept.
+func (pm *processManager) projectName(pid int32, start uint64) string {
+	if c, ok := pm.projects[pid]; ok && c.start == start {
+		return c.name
+	}
+	dir := filepath.Join(pm.procDir, strconv.Itoa(int(pid)))
+	name := ""
+	if env := readEnviron(pid, dir); env != nil {
+		var project, branch, workspace string
+		for kv := range strings.SplitSeq(string(env), "\x00") {
+			if v, ok := strings.CutPrefix(kv, "CONDUCTOR_PROJECT_NAME="); ok {
+				project = v
+			} else if v, ok := strings.CutPrefix(kv, "CONDUCTOR_BRANCH="); ok {
+				branch = v
+			} else if v, ok := strings.CutPrefix(kv, "CONDUCTOR_WORKSPACE_NAME="); ok {
+				workspace = v
+			}
+		}
+		if project != "" {
+			name = project + "/" + cmp.Or(branch, workspace, "?")
+		}
+	}
+	if name == "" {
+		name = gitRepoName(dir)
+	}
+	pm.projects[pid] = procProject{start: start, name: name}
+	return name
+}
+
+// readEnviron returns a process's environment block (NUL-separated KEY=value).
+// /proc/<pid>/environ is mode 0400, so a capability that passes the ptrace
+// check still cannot open another user's; instead read the block from the
+// process's memory, which needs only the ptrace check. Its address range is in
+// /proc/<pid>/stat (env_start, env_end), filled in for a reader with ptrace
+// access. Returns nil when it can't be read.
+func readEnviron(pid int32, procPidDir string) []byte {
+	if raw, err := os.ReadFile(filepath.Join(procPidDir, "environ")); err == nil {
+		return raw // our own processes, or an agent running as root
+	}
+	stat, err := os.ReadFile(filepath.Join(procPidDir, "stat"))
+	if err != nil {
+		return nil
+	}
+	end := bytes.LastIndexByte(stat, ')')
+	if end < 0 {
+		return nil
+	}
+	// fields after comm start at state (field 3); env_start/env_end are 50 and 51
+	f := strings.Fields(string(stat[end+1:]))
+	if len(f) < 49 {
+		return nil
+	}
+	start, _ := strconv.ParseUint(f[47], 10, 64)
+	stop, _ := strconv.ParseUint(f[48], 10, 64)
+	if start == 0 || stop <= start {
+		return nil
+	}
+	size := min(stop-start, 64*1024)
+	buf := make([]byte, size)
+	local := []unix.Iovec{{Base: &buf[0]}}
+	local[0].SetLen(int(size))
+	remote := []unix.RemoteIovec{{Base: uintptr(start), Len: int(size)}}
+	n, err := unix.ProcessVMReadv(int(pid), local, remote, 0)
+	if err != nil || n <= 0 {
+		return nil
+	}
+	return buf[:n]
+}
+
+// gitRepoName is the folder name of the git repository holding the process's
+// working folder. It walks up through /proc/<pid>/cwd rather than the path, so
+// it works when a parent folder (a 700 home) is closed to the agent.
+func gitRepoName(procPidDir string) string {
+	cwd, err := os.Readlink(filepath.Join(procPidDir, "cwd"))
+	if err != nil || cwd == "/" {
+		return ""
+	}
+	segs := strings.Split(strings.Trim(cwd, "/"), "/")
+	// built by hand: filepath.Join would clean the "../" away
+	up := procPidDir + "/cwd/"
+	for i := len(segs); i > 1 && len(segs)-i < 6; i-- {
+		if _, err := os.Lstat(up + ".git"); err == nil {
+			return segs[i-1]
+		}
+		up += "../"
+	}
+	return ""
 }
 
 func (pm *processManager) userName(uid uint32) string {

@@ -1,14 +1,15 @@
 import { t } from "@lingui/core/macro"
 import { Trans } from "@lingui/react/macro"
 import { ArrowDownIcon, ArrowUpIcon } from "lucide-react"
+import { useStore } from "@nanostores/react"
 import { listenKeys } from "nanostores"
 import { useState } from "react"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
+import { FilterBar } from "@/components/routes/system/chart-card"
 import { Separator } from "@/components/ui/separator"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { pb } from "@/lib/api"
-import { $allSystemsById } from "@/lib/stores"
+import { $allSystemsById, $containerFilter } from "@/lib/stores"
 import { useMountEffect } from "@/lib/use-mount-effect"
 import { cn, decimalString, formatBytes } from "@/lib/utils"
 import type { ProcessesRecord, ProcRecord } from "@/types"
@@ -45,7 +46,8 @@ function runningFor(start?: number) {
 export default function ProcessesTable({ systemId, liveProcs }: { systemId: string; liveProcs: ProcRecord[] | null }) {
 	const [stored, setStored] = useState<ProcessesRecord | null>(null)
 	const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: "c", desc: true })
-	const [filter, setFilter] = useState("")
+	// shared with the process charts, so one filter narrows the charts and this table
+	const filter = useStore($containerFilter)
 
 	useMountEffect(() => {
 		const fetchProcs = () =>
@@ -105,12 +107,9 @@ export default function ProcessesTable({ systemId, liveProcs }: { systemId: stri
 							{liveProcs ? <Trans>Live</Trans> : <Trans>Updated every minute</Trans>}
 						</div>
 					</div>
-					<Input
-						placeholder={t`Filter...`}
-						value={filter}
-						onChange={(e) => setFilter(e.target.value)}
-						className="ms-auto px-4 w-full max-w-full md:w-64"
-					/>
+					<div className="relative ms-auto w-full md:w-64">
+						<FilterBar />
+					</div>
 				</div>
 			</CardHeader>
 			<div className="max-h-[calc(100dvh-17rem)] max-w-full overflow-auto border rounded-md">
@@ -147,7 +146,17 @@ export default function ProcessesTable({ systemId, liveProcs }: { systemId: stri
 											</div>
 										)}
 									</TableCell>
-									<TableCell className="px-3 py-2 whitespace-nowrap">{p.g}</TableCell>
+									<TableCell className="px-3 py-2 whitespace-nowrap">
+										<button
+											type="button"
+											className="hover:underline underline-offset-2 text-start"
+											title={t`Show only this group`}
+											// the group without its "(user)" tag: the filter splits on spaces
+											onClick={() => $containerFilter.set(p.g.replace(/ \([^)]*\)$/, ""))}
+										>
+											{p.g}
+										</button>
+									</TableCell>
 									<TableCell className="px-3 py-2 text-end tabular-nums">{decimalString(p.c, 2)}%</TableCell>
 									<TableCell className="px-3 py-2 text-end tabular-nums whitespace-nowrap">
 										{decimalString(m.value, m.value >= 10 ? 0 : 1)} {m.unit}

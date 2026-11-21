@@ -9,14 +9,11 @@
     }
   },
   "hammas-dev": {
-    "_note": "8 cores / 16 GB dev box with no Docker. Its agent runs with PROCESSES=true, so apps are process groups: a systemd service, or a program outside one, tagged with the user ('t3code (hammas)', 'bun (hammas)'). 25% is two cores. 'bun (hammas)' is every tmux dev server summed, so it gets 6 GB.",
+    "_note": "8 cores / 16 GB dev box with no Docker. Its agent runs with PROCESSES=true, so apps are process groups: a systemd service, a project for processes outside one (conductor worktree 'facemap/t3/fix-x', or a git repo), else a program, tagged with the user ('t3code (hammas)'). 25% is two cores.",
     "*": {
       "cpu": 25,
       "memory": 3,
       "min": 10
-    },
-    "bun (hammas)": {
-      "memory": 6
     }
   }
 }
